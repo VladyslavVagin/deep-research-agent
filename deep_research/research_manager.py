@@ -3,6 +3,7 @@ from search_agent import search_agent
 from planner_agent import planner_agent, WebSearchItem, WebSearchPlan
 from writer_agent import writer_agent, ReportData
 from email_agent import email_agent
+from evaluator import Evaluator, evaluator
 import asyncio
 
 class ResearchManager:
@@ -17,8 +18,10 @@ class ResearchManager:
             search_plan = await self.plan_searches(query)
             yield "Searches planned, starting to search..."     
             search_results = await self.perform_searches(search_plan)
-            yield "Searches complete, writing report..."
-            report = await self.write_report(query, search_results)
+            yield "Searches complete, evaluating..."
+            evaluation = await self.evaluate(search_results)
+            yield "Evaluation complete, writing report..."
+            report = await self.write_report(query, search_results, evaluation)
             yield "Report written, sending email..."
             await self.send_email(report)
             yield "Email sent, research complete"
@@ -32,16 +35,8 @@ class ResearchManager:
             planner_agent,
             f"Query: {query}",
         )
-        print(f"Agent result type: {type(result)}")
-        print(f"Final output type: {type(result.final_output)}")
-        print(f"Final output content: {result.final_output}")
-        
-        # Convert the result to the proper type first
-        search_plan = result.final_output_as(WebSearchPlan)
-        print(f"Search plan type: {type(search_plan)}")
-        print(f"Search plan: {search_plan}")
-        print(f"Will perform {len(search_plan.searches)} searches")
-        return search_plan
+        print(f"Will perform {len(result.final_output.searches)} searches")
+        return result.final_output_as(WebSearchPlan)
 
     async def perform_searches(self, search_plan: WebSearchPlan) -> list[str]:
         """ Perform the searches to perform for the query """
@@ -70,10 +65,21 @@ class ResearchManager:
         except Exception:
             return None
 
-    async def write_report(self, query: str, search_results: list[str]) -> ReportData:
+    async def evaluate(self, search_results: list[str]) -> Evaluator:
+        """ Evaluate the quality of the search results """
+        print("Evaluating search results...")
+        input = f"Search results to evaluate:\n" + "\n\n".join(search_results)
+        result = await Runner.run(
+            evaluator,
+            input,
+        )
+        print("Evaluation complete")
+        return result.final_output_as(Evaluator)
+
+    async def write_report(self, query: str, search_results: list[str], evaluation: Evaluator) -> ReportData:
         """ Write the report for the query """
         print("Thinking about report...")
-        input = f"Original query: {query}\nSummarized search results: {search_results}"
+        input = f"Original query: {query}\nSummarized search results: {search_results}\nEvaluation: {evaluation}"
         result = await Runner.run(
             writer_agent,
             input,
@@ -84,13 +90,9 @@ class ResearchManager:
     
     async def send_email(self, report: ReportData) -> None:
         print("Writing email...")
-        try:
-            result = await Runner.run(
-                email_agent,
-                report.markdown_report,
-            )
-            print("Email sent")
-        except Exception as e:
-            print(f"Failed to send email: {e}")
-            print("Continuing without email...")
+        result = await Runner.run(
+            email_agent,
+            report.markdown_report,
+        )
+        print("Email sent")
         return report
